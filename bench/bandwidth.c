@@ -54,6 +54,7 @@ int *g_mem_ptr = 0;		   /* pointer to allocated memory region */
 volatile uint64_t g_nread = 0;	           /* number of bytes read */
 volatile unsigned int g_start;		   /* starting time */
 int cpuid = 0;
+int g_stride = CACHE_LINE_SIZE;
 
 /**************************************************************************
  * Public Functions
@@ -178,6 +179,7 @@ void quit(int param)
 	dur_in_sec = (float)dur / 1000000;
 	printf("g_nread(bytes read) = %lld\n", (long long)g_nread);
 	printf("elapsed = %.2f sec ( %.0f usec )\n", dur_in_sec, dur);
+	g_nread = g_nread / ( g_stride / CACHE_LINE_SIZE );
 	bw = (float)g_nread / dur_in_sec / 1024 / 1024;
 	printf("CPU%d: B/W = %.2f MB/s | ",cpuid, bw);
 	printf("CPU%d: average = %.2f ns\n", cpuid, (dur*1000)/(g_nread/CACHE_LINE_SIZE));
@@ -188,7 +190,7 @@ int64_t bench_read()
 {
 	int64_t i;
 	int64_t sum = 0;
-	for ( i = 0; i < g_mem_size/4; i+=(CACHE_LINE_SIZE/4) ) {
+	for ( i = 0; i < g_mem_size/4; i+=(g_stride/4) ) {
 		sum += g_mem_ptr[i];
 	}
 	g_nread += g_mem_size;
@@ -198,7 +200,7 @@ int64_t bench_read()
 int bench_write()
 {
 	register int64_t i;
-	for ( i = 0; i < g_mem_size/4; i+=(CACHE_LINE_SIZE/4) ) {
+	for ( i = 0; i < g_mem_size/4; i+=(g_stride/4) ) {
 		g_mem_ptr[i] = i;
 	}
 	g_nread += g_mem_size;
@@ -216,6 +218,7 @@ void usage(int argc, char *argv[])
 	printf("-c <int> : CPU to run.\n");
 	printf("-i <int> : iterations. 0 means intefinite. default=0\n");
 	printf("-p <int> : CFS priority (nice value). -20 (highest)..19 (lowest) \n");
+	printf("-s <int> : stride in bytes (multiple of %d). default=%d\n", CACHE_LINE_SIZE, CACHE_LINE_SIZE);
 	printf("-h : help\n");
 	printf("\nExamples: \n$ bandwidth -m 8192 -a read -t 1 -c 2\n  <- 8MB read for 1 second on CPU 2\n");
 	exit(1);
@@ -238,7 +241,7 @@ int main(int argc, char *argv[])
 	/*
 	 * get command line options 
 	 */
-	while ((opt = getopt(argc, argv, "m:a:t:c:i:p:r:xh")) != -1) {
+	while ((opt = getopt(argc, argv, "s:m:a:t:c:i:p:r:xh")) != -1) {
 		switch (opt) {
 		case 'm': /* set memory size */
 			if (optarg[strlen(optarg)-1] == 'G' || optarg[strlen(optarg)-1] == 'g')
@@ -291,6 +294,9 @@ int main(int argc, char *argv[])
 		case 'i': /* iterations */
 			iterations = strtol(optarg, NULL, 0);
 			break;
+		case 's':
+			g_stride = strtol(optarg, NULL, 0);
+			break;
 		case 'h': 
 			usage(argc, argv);
 			break;
@@ -327,10 +333,11 @@ int main(int argc, char *argv[])
 		g_mem_ptr[i] = i;
 
 	/* print experiment info before starting */
-	printf("memsize=%ld KB, type=%s, cpuid=%d\n",
+	printf("memsize=%ld KB, type=%s, cpuid=%d, stride=%d\n",
 	       g_mem_size/1024,
 	       ((acc_type==READ) ?"read": "write"),
-		cpuid);
+		cpuid,
+		g_stride);
 	printf("stop at %d\n", finish);
 
 	/* set signals to terminate once time has been reached */

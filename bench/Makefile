@@ -1,6 +1,6 @@
-CC = gcc
-CXX = g++
-CFLAGS = -O3 -Wall -march=native -g
+CC = riscv64-unknown-linux-gnu-gcc
+CXX = riscv64-unknown-linux-gnu-g++
+CFLAGS = -O3 -Wall -g -DRISCV
 CXXFLAGS = $(CFLAGS)
 
 PGMS = latency bandwidth bandwidth-rt pll pagetype cpuhog
