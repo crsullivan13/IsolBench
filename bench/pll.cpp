@@ -39,6 +39,7 @@
 #include <sys/resource.h>
 #include <assert.h>
 #include <random>
+#include <utility>
 #include <signal.h>
 
 /**************************************************************************
@@ -386,31 +387,72 @@ static void *map_hugepage(size_t length, unsigned long *mapped_size_kb)
 /**************************************************************************
  * Implementation
  **************************************************************************/
-int64_t run(int64_t iter, int mlp)
+/*
+ * The chase loops are instantiated per MLP so that the inner loop has a
+ * compile-time trip count. The compiler then fully unrolls it and keeps
+ * the list heads and indices in registers instead of reloading/storing
+ * the global next[] on every access, which would otherwise consume
+ * load/store queue entries and limit the achievable MLP.
+ */
+template <int MLP, bool WRITE>
+static int64_t run_mlp(int64_t iter)
 {
+	int64_t *l[MLP];
+	int64_t n[MLP];
 	int64_t cnt = 0;
 
-	for (int64_t i = 0; i < iter && keep_running; i++) {
-		for (int j = 0; j < mlp; j++) {
-			next[j] = list[j][next[j]];
-		}
-		cnt += mlp;
+#pragma GCC unroll 64
+	for (int j = 0; j < MLP; j++) {
+		l[j] = list[j];
+		n[j] = next[j];
 	}
+
+	for (int64_t i = 0; i < iter && keep_running; i++) {
+		int64_t v[MLP];
+#pragma GCC unroll 64
+		for (int j = 0; j < MLP; j++)
+			v[j] = l[j][n[j]];
+		if (WRITE) {
+			/* keep the stores after the chase loads so they commit
+			 * once the line is present instead of missing on their own */
+			asm volatile("" ::: "memory");
+#pragma GCC unroll 64
+			for (int j = 0; j < MLP; j++)
+				l[j][n[j]+1] = 0xff; // write
+		}
+#pragma GCC unroll 64
+		for (int j = 0; j < MLP; j++)
+			n[j] = v[j];
+		cnt += MLP;
+	}
+
+#pragma GCC unroll 64
+	for (int j = 0; j < MLP; j++)
+		next[j] = n[j];
 	return cnt;
+}
+
+typedef int64_t (*run_fn)(int64_t);
+
+template <bool WRITE, int... Is>
+static run_fn select_run(int mlp, std::integer_sequence<int, Is...>)
+{
+	static const run_fn table[] = { run_mlp<Is + 1, WRITE>... };
+	if (mlp < 1 || mlp > (int)sizeof...(Is)) {
+		fprintf(stderr, "MLP must be between 1 and %d\n", (int)sizeof...(Is));
+		exit(1);
+	}
+	return table[mlp - 1];
+}
+
+int64_t run(int64_t iter, int mlp)
+{
+	return select_run<false>(mlp, std::make_integer_sequence<int, MAX_MLP>())(iter);
 }
 
 int64_t run_write(int64_t iter, int mlp)
 {
-	int64_t cnt = 0;
-
-	for (int64_t i = 0; i < iter && keep_running; i++) {
-		for (int j = 0; j < mlp; j++) {
-			list[j][next[j]+1] = 0xff; // write
-			next[j] = list[j][next[j]];
-		}
-		cnt += mlp;
-	}
-	return cnt;
+	return select_run<true>(mlp, std::make_integer_sequence<int, MAX_MLP>())(iter);
 }
 
 int main(int argc, char* argv[])
