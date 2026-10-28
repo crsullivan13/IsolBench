@@ -3,7 +3,7 @@ CXX = riscv64-unknown-linux-gnu-g++
 CFLAGS = -O3 -Wall -g -DRISCV
 CXXFLAGS = $(CFLAGS)
 
-PGMS = latency bandwidth bandwidth-rt pll pagetype cpuhog
+PGMS = latency bandwidth bandwidth-mon bandwidth-rt pll pagetype cpuhog
 
 all: $(PGMS)
 
